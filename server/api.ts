@@ -13,7 +13,7 @@ import {
   getTursoConfigInfo,
   setTursoCredentials,
   resetTursoToDefault,
-} from './db';
+} from './db.ts';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'giapha_jwt_secret_token_2026';
 
