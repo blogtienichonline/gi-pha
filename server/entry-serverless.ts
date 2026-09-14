@@ -1,7 +1,7 @@
 import 'dotenv/config';
 import express from 'express';
-import { apiRouter } from '../server/api';
-import { initDatabase } from '../server/db';
+import { apiRouter } from './api';
+import { initDatabase } from './db';
 
 const app = express();
 
@@ -21,10 +21,14 @@ app.use((req, res, next) => {
   next();
 });
 
-// 2. Safe request body parsing (prevent hanging if Vercel already consumed/parsed stream)
+// 2. Safe request body parsing (protect against Vercel pre-parsed bodies / buffers / stream ending)
 app.use((req, res, next) => {
   if (req.body !== undefined && req.body !== null) {
-    if (typeof req.body === 'string') {
+    if (Buffer.isBuffer(req.body)) {
+      try {
+        req.body = JSON.parse(req.body.toString('utf-8'));
+      } catch (_) {}
+    } else if (typeof req.body === 'string') {
       try {
         req.body = JSON.parse(req.body);
       } catch (_) {}
@@ -49,16 +53,15 @@ app.use((req, res, next) => {
 
 // 3. Normalize request URL for Vercel rewrites
 app.use((req, _res, next) => {
-  // If Vercel rewrote URL to /api, recover original request path
-  if (req.url === '/' || req.url === '/api' || req.url.startsWith('/api?')) {
-    const original =
-      req.originalUrl ||
-      (req.headers['x-matched-path'] as string) ||
-      (req.headers['x-forwarded-uri'] as string);
+  const urlCandidate =
+    (req.headers['x-matched-path'] as string) ||
+    (req.headers['x-vercel-matched-path'] as string) ||
+    (req.headers['x-forwarded-uri'] as string) ||
+    req.originalUrl ||
+    req.url;
 
-    if (original && original !== '/' && original !== '/api') {
-      req.url = original;
-    }
+  if (urlCandidate && urlCandidate !== '/' && urlCandidate !== '/api') {
+    req.url = urlCandidate;
   }
   next();
 });
@@ -84,7 +87,7 @@ app.use(async (_req, _res, next) => {
   next();
 });
 
-// Health check endpoint for testing deployment status
+// Health check endpoints for testing deployment status
 app.get(['/health', '/api/health'], (_req, res) => {
   res.json({
     status: 'ok',
@@ -120,5 +123,3 @@ app.use((err: any, _req: express.Request, res: express.Response, _next: express.
 
 // Standard export for Vercel Serverless Function with Express
 export default app;
-
-

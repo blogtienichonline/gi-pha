@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {
   db,
+  initDatabase,
   verifyPassword,
   hashPassword,
   resetToPhamClanDemo,
@@ -17,6 +18,17 @@ import {
 const JWT_SECRET = process.env.JWT_SECRET || 'giapha_jwt_secret_token_2026';
 
 export const apiRouter = express.Router();
+
+// GET /api/health
+apiRouter.get('/health', (_req: Request, res: Response) => {
+  res.json({
+    status: 'ok',
+    timestamp: new Date().toISOString(),
+    message: 'Gia Phả Họ Phạm API đang hoạt động bình thường',
+    host: getTursoHost(),
+    isCustomTurso: isCustomTursoConfigured(),
+  });
+});
 
 // Middleware to extract user from Authorization header
 export interface AuthenticatedUser {
@@ -71,22 +83,42 @@ apiRouter.use(authMiddleware);
 // POST /api/auth/login
 apiRouter.post('/auth/login', async (req: Request, res: Response) => {
   try {
-    const { username, password } = req.body;
+    const { username, password } = req.body || {};
     if (!username || !password) {
       return res.status(400).json({ success: false, message: 'Vui lòng nhập tên đăng nhập và mật khẩu.' });
     }
 
-    const result = await db.execute({
-      sql: 'SELECT id, username, password_hash, full_name, role FROM users WHERE username = ?',
-      args: [username.trim().toLowerCase()],
-    });
+    const cleanUsername = String(username).trim().toLowerCase();
+    const cleanPassword = String(password);
 
-    if (result.rows.length === 0) {
+    // Auto-initialize tables and default admin if not yet initialized
+    try {
+      await initDatabase();
+    } catch (initErr) {
+      console.warn('[Auth] Database init check warning:', initErr);
+    }
+
+    let result;
+    try {
+      result = await db.execute({
+        sql: 'SELECT id, username, password_hash, full_name, role FROM users WHERE username = ?',
+        args: [cleanUsername],
+      });
+    } catch (queryErr: any) {
+      console.error('[Auth] Query error, attempting forced table initialization:', queryErr);
+      await initDatabase(true);
+      result = await db.execute({
+        sql: 'SELECT id, username, password_hash, full_name, role FROM users WHERE username = ?',
+        args: [cleanUsername],
+      });
+    }
+
+    if (!result || result.rows.length === 0) {
       return res.status(401).json({ success: false, message: 'Tài khoản hoặc mật khẩu không chính xác.' });
     }
 
     const user = result.rows[0];
-    const isMatch = verifyPassword(password, String(user.password_hash));
+    const isMatch = verifyPassword(cleanPassword, String(user.password_hash));
     if (!isMatch) {
       return res.status(401).json({ success: false, message: 'Tài khoản hoặc mật khẩu không chính xác.' });
     }
@@ -106,9 +138,12 @@ apiRouter.post('/auth/login', async (req: Request, res: Response) => {
       user: userPayload,
       message: 'Đăng nhập thành công.',
     });
-  } catch (error) {
+  } catch (error: any) {
     console.error('Login error:', error);
-    return res.status(500).json({ success: false, message: 'Lỗi máy chủ khi đăng nhập.' });
+    return res.status(500).json({
+      success: false,
+      message: error?.message ? `Lỗi đăng nhập (${error.message})` : 'Lỗi máy chủ khi đăng nhập.',
+    });
   }
 });
 
