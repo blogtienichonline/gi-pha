@@ -1,0 +1,4 @@
+# Exclude standalone container server so Vercel uses Vite static build + api/index.ts
+server.ts
+server.js
+turso-config.json
